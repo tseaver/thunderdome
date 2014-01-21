@@ -335,6 +335,7 @@ class TestIndexCreation(BaseThunderdomeTestCase):
     """
     Tests that automatic index creation works as expected
     """
+    old_index_setting = None
     def setUp(self):
         super(TestIndexCreation, self).setUp()
         self.old_create_index = connection.create_key_index
@@ -343,18 +344,22 @@ class TestIndexCreation(BaseThunderdomeTestCase):
             #fire blanks
             self.index_calls.append(name)
             #return self.old_create_index(name)
-        connection.create_key_index = new_create_index
+        connection._the_connection.create_key_index = new_create_index
 
         self.old_vertex_types = models.vertex_types
         models.vertex_types = {}
 
-        self.old_index_setting = connection._index_all_fields
-
     def tearDown(self):
         super(TestIndexCreation, self).tearDown()
         models.vertex_types = self.old_vertex_types
-        connection._index_all_fields = self.old_index_setting
-        connection.create_key_index = self.old_create_index 
+        if self.old_index_setting is not None:
+            self._mock_indexing(self.old_index_setting)
+        connection._the_connection.create_key_index = self.old_create_index 
+
+    def _mock_indexing(self, value):
+        conn = connection._the_connection
+        (self.old_index_setting, conn._index_all_fields
+        ) = (conn._index_all_fields, value)
 
     def test_create_index_is_called(self):
         """
@@ -362,20 +367,20 @@ class TestIndexCreation(BaseThunderdomeTestCase):
         """
         assert len(self.index_calls) == 0
 
-        connection._index_all_fields = False
+        self._mock_indexing(False)
         
         class TestIndexCreationCallTestVertex(Vertex):
             col1 = properties.Text(index=True)
             col2 = properties.Text(index=True, db_field='____column')
             col3 = properties.Text(db_field='____column3')
 
-        assert len(self.index_calls) == 2
+        assert len(self.index_calls) == 2, self.index_calls
         assert 'vid' not in self.index_calls
         assert 'col1' in self.index_calls
         assert '____column' in self.index_calls
         assert '____column3' not in self.index_calls
 
-        connection._index_all_fields = True
+        self._mock_indexing(True)
         self.index_calls = []
 
         class TestIndexCreationCallTestVertex2(Vertex):

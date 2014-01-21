@@ -17,16 +17,9 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-from unittest import skip
-from thunderdome import connection 
 from thunderdome.tests.base import BaseThunderdomeTestCase
-
-
-from thunderdome import gremlin
-from thunderdome import models
 from thunderdome.models import Edge, PaginatedVertex
 from thunderdome import properties
-import unittest
 
 
 
@@ -40,7 +33,7 @@ class TestPEdge(Edge):
 
 
 
-class PaginatedVertexTest(unittest.TestCase):
+class PaginatedVertexTest(BaseThunderdomeTestCase):
     def test_traversal(self):
         t = TestPModel.create()
         t2 = TestPModel.create()

@@ -26,8 +26,12 @@ class BaseThunderdomeTestCase(TestCase):
     @classmethod
     def setUpClass(cls):
         super(BaseThunderdomeTestCase, cls).setUpClass()
-        if not connection._hosts:
-            connection.setup(['localhost'], 'thunderdome')
+        connection.setup(['localhost'], 'thunderdome')
+
+    @classmethod
+    def tearDownClass(cls):
+        super(BaseThunderdomeTestCase, cls).setUpClass()
+        connection.destroy()
 
     def assertHasAttr(self, obj, attr):
         self.assertTrue(hasattr(obj, attr), 

@@ -19,7 +19,6 @@
 
 from datetime import datetime
 
-from thunderdome import connection 
 from thunderdome.tests.base import BaseThunderdomeTestCase
 
 from thunderdome.models import Vertex, Edge, IN, OUT, BOTH, GREATER_THAN, LESS_THAN
@@ -55,6 +54,7 @@ class BaseTraversalTestCase(BaseThunderdomeTestCase):
         :param cls:
         :return:
         """
+        super(BaseTraversalTestCase, cls).setUpClass()
         cls.jon = Person.create(name='Jon', age=143)
         cls.eric = Person.create(name='Eric', age=25)
         cls.blake = Person.create(name='Blake', age=14)

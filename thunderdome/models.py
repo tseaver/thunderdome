@@ -18,15 +18,24 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 from collections import OrderedDict
+import copy
 import inspect
 import re
-from uuid import UUID
-import warnings
 
-from thunderdome import properties
-from thunderdome.connection import execute_query, create_key_index, ThunderdomeQueryError
-from thunderdome.exceptions import ModelException, ValidationError, DoesNotExist, MultipleObjectsReturned, ThunderdomeException, WrongElementType
-from thunderdome.gremlin import BaseGremlinMethod, GremlinMethod
+from thunderdome.connection import ThunderdomeQueryError
+from thunderdome.exceptions import ModelException
+from thunderdome.exceptions import ValidationError
+from thunderdome.exceptions import DoesNotExist as DNEBase
+from thunderdome.exceptions import MultipleObjectsReturned as MORBase
+from thunderdome.exceptions import ThunderdomeException
+from thunderdome.exceptions import WrongElementType
+from thunderdome.gremlin import BaseGremlinMethod
+from thunderdome.gremlin import GremlinMethod
+from thunderdome.properties import Column
+from thunderdome.properties import SAVE_ALWAYS
+from thunderdome.properties import SAVE_ONCE
+from thunderdome.properties import SAVE_ONCHANGE
+from thunderdome.properties import UUID
 
 
 #dict of node and edge types for rehydrating results
@@ -68,14 +77,14 @@ class BaseElement(object):
 
     # When true this will prepend the module name to the type name of the class
     __use_module_name__ = False
-    __default_save_strategy__ = properties.SAVE_ALWAYS
+    __default_save_strategy__ = SAVE_ALWAYS
     
-    class DoesNotExist(DoesNotExist):
+    class DoesNotExist(DNEBase):
         """
         Object not found in database
         """
 
-    class MultipleObjectsReturned(MultipleObjectsReturned):
+    class MultipleObjectsReturned(MORBase):
         """
         Multiple objects returned on unique key lookup
         """
@@ -204,13 +213,13 @@ class BaseElement(object):
                 col_strategy = col.get_save_strategy()
 
             # Enforce the save strategy
-            if col_strategy == properties.SAVE_ONCE:
+            if col_strategy == SAVE_ONCE:
                 if was_saved:
                     if self._values[name].changed:
                         raise SaveStrategyException("Attempt to change column '{}' with save strategy SAVE_ONCE".format(name))
                     else:
                         should_save = False
-            elif col_strategy == properties.SAVE_ONCHANGE:
+            elif col_strategy == SAVE_ONCHANGE:
                 if was_saved and not self._values[name].changed:
                     should_save = False
             
@@ -322,8 +331,10 @@ class ElementMetaClass(type):
             else:
                 attrs[col_name] = property(_get, _set)
 
-        column_definitions = [(k,v) for k,v in attrs.items() if isinstance(v, properties.Column)]
-        column_definitions = sorted(column_definitions, lambda x,y: cmp(x[1].position, y[1].position))
+        column_definitions = [(k,v) for k,v in attrs.items()
+                                if isinstance(v, Column)]
+        column_definitions = sorted(column_definitions,
+                                lambda x,y: cmp(x[1].position, y[1].position))
         
         #TODO: check that the defined columns don't conflict with any of the
         #Model API's existing attributes/methods transform column definitions
@@ -388,7 +399,25 @@ class ElementMetaClass(type):
 
 class Element(BaseElement):
     __metaclass__ = ElementMetaClass
-    
+
+    _connection = None
+
+    @classmethod
+    def _get_connection(cls):
+        from thunderdome.connection import _the_connection
+        if cls._connection is None:
+            return _the_connection
+        return cls._connection
+
+    @classmethod
+    def _set_connection(cls, conn):
+        cls._connection = conn
+        cls._on_new_connection(conn)
+
+    @classmethod
+    def _on_new_connection(cls, conn):
+        pass
+ 
     @classmethod
     def deserialize(cls, data):
         """
@@ -449,7 +478,7 @@ class Vertex(Element):
     _delete_related = GremlinMethod()
 
     #vertex id
-    vid = properties.UUID(save_strategy=properties.SAVE_ONCE)
+    vid = UUID(save_strategy=SAVE_ONCE)
     
     element_type = None
 
@@ -460,12 +489,16 @@ class Vertex(Element):
         hasn't been called, but connection.setup calls this method on existing
         vertices
         """
-        from thunderdome.connection import _hosts, _index_all_fields, create_key_index
+        conn = cls._get_connection()
         
-        if not _hosts: return
+        if conn is None: return
         for column in cls._columns.values():
-            if column.index or _index_all_fields:
-                create_key_index(column.db_field_name)
+            if column.index or conn._index_all_fields:
+                conn.create_key_index(column.db_field_name)
+
+    @classmethod
+    def _on_new_connection(cls, conn):
+        cls._create_indices()
     
     @classmethod
     def get_element_type(cls):
@@ -492,13 +525,14 @@ class Vertex(Element):
         :rtype: dict or list
         
         """
+        conn = cls._get_connection()
         if not isinstance(vids, (list, tuple)):
             raise ThunderdomeQueryError("vids must be of type list or tuple")
         
         strvids = [str(v) for v in vids]
         qs = ['vids.collect{g.V("vid", it).toList()[0]}']
         
-        results = execute_query('\n'.join(qs), {'vids':strvids})
+        results = conn.execute_query('\n'.join(qs), {'vids':strvids})
         results = filter(None, results)
         
         if len(results) != len(vids):
@@ -523,7 +557,8 @@ class Vertex(Element):
         Method for reloading the current vertex by reading its current values
         from the database.
         """
-        results = execute_query('g.v(eid)', {'eid':self.eid})[0]
+        conn = self._get_connection()
+        results = conn.execute_query('g.v(eid)', {'eid':self.eid})[0]
         del results['_id']
         del results['_type']
         return results
@@ -566,7 +601,8 @@ class Vertex(Element):
         :rtype: thunderdome.models.Vertex
         
         """
-        results = execute_query('g.v(eid)', {'eid':eid})
+        conn = cls._get_connection()
+        results = conn.execute_query('g.v(eid)', {'eid':eid})
         if not results:
             raise cls.DoesNotExist
         return Element.deserialize(results[0])
@@ -597,7 +633,8 @@ class Vertex(Element):
         g.removeVertex(g.v(eid))
         g.stopTransaction(SUCCESS)
         """
-        results = execute_query(query, {'eid': self.eid})
+        conn = self._get_connection()
+        results = conn.execute_query(query, {'eid': self.eid})
         
     def _simple_traversal(self,
                           operation,
@@ -1001,7 +1038,8 @@ class Edge(Element):
         """
         Re-read the values for this edge from the graph database.
         """
-        results = execute_query('g.e(eid)', {'eid':self.eid})[0]
+        conn = self._get_connection()
+        results = conn.execute_query('g.e(eid)', {'eid':self.eid})[0]
         del results['_id']
         del results['_type']
         return results
@@ -1016,7 +1054,8 @@ class Edge(Element):
         :type eid: int
         
         """
-        results = execute_query('g.e(eid)', {'eid':eid})
+        conn = cls._get_connection()
+        results = conn.execute_query('g.e(eid)', {'eid':eid})
         if not results:
             raise cls.DoesNotExist
         return Element.deserialize(results[0])
@@ -1050,7 +1089,8 @@ class Edge(Element):
           g.stopTransaction(SUCCESS)
         }
         """        
-        results = execute_query(query, {'eid':self.eid})
+        conn = self._get_connection()
+        results = conn.execute_query(query, {'eid':self.eid})
 
     def _simple_traversal(self, operation):
         """
@@ -1062,7 +1102,9 @@ class Edge(Element):
         :rtype: list
         
         """
-        results = execute_query('g.e(eid).%s()'%operation, {'eid':self.eid})
+        conn = self._get_connection()
+        results = conn.execute_query('g.e(eid).%s()' % operation,
+                                        {'eid':self.eid})
         return [Element.deserialize(r) for r in results]
         
     def inV(self):
@@ -1093,7 +1135,6 @@ class Edge(Element):
 
 
 
-import copy
 
 class Query(object):
     """
@@ -1240,7 +1281,8 @@ class Query(object):
     def _execute(self, func, deserialize=True):
         tmp = "{}.{}()".format(self._get_partial(), func)
         self._vars.update({"eid":self._vertex.eid, "limit":self._limit})
-        results = execute_query(tmp, self._vars)
+        conn = self._vertex._get_connection()
+        results = conn.execute_query(tmp, self._vars)
 
         if deserialize:
             return  [Element.deserialize(r) for r in results]
