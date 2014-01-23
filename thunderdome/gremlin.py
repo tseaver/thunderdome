@@ -1,9 +1,8 @@
 import inspect
 import os.path
-import time
 import logging
 
-from thunderdome.connection import execute_query, ThunderdomeQueryError
+from thunderdome.connection import ThunderdomeQueryError
 from thunderdome.exceptions import ThunderdomeException
 from thunderdome.groovy import parse
 from containers import Table
@@ -166,8 +165,7 @@ class BaseGremlinMethod(object):
         params = self.transform_params_to_database(params)
 
         try:
-            from thunderdome import Vertex
-            from thunderdome import Edge
+            from thunderdome import connection
             
             if hasattr(instance, 'get_element_type'):
                 context = "vertices.{}".format(instance.get_element_type())
@@ -178,7 +176,14 @@ class BaseGremlinMethod(object):
 
             context = "{}.{}".format(context, self.method_name)
 
-            tmp = execute_query(self.function_body, params, transaction=self.transaction, context=context)
+            _get_connection = getattr(instance, '_get_connection', None)
+            if _get_connection is None:
+                conn = connection._the_connection
+            else:
+                conn = _get_connection()
+            tmp = conn.execute_query(self.function_body, params,
+                                     transaction=self.transaction,
+                                     context=context)
         except ThunderdomeQueryError as tqe:
             import pprint
             msg  = "Error while executing Gremlin method\n\n"
