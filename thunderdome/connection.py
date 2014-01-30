@@ -299,27 +299,33 @@ def destroy():
     _the_connection = None
 
 
-def create_key_index(name):
+def create_key_index(name, conn=None):
     """
     Creates a key index if it does not already exist
     """
-    if _the_connection is None:
+    if conn is None:
+        conn = _the_connection
+
+    if conn is None:
         raise ValueError('setup() not called')
 
-    return _the_connection.create_key_index(name)
+    return conn.create_key_index(name)
 
         
-def create_unique_index(name, data_type):
+def create_unique_index(name, data_type, conn=None):
     """
     Creates a key index if it does not already exist
     """
-    if _the_connection is None:
+    if conn is None:
+        conn = _the_connection
+
+    if conn is None:
         raise ValueError('setup() not called')
 
-    return _the_connection.create_unique_index(name, data_type)
+    return conn.create_unique_index(name, data_type)
  
     
-def execute_query(query, params={}, transaction=True, context=""):
+def execute_query(query, params={}, transaction=True, context="", conn=None):
     """
     Execute a raw Gremlin query with the given parameters passed in.
 
@@ -332,10 +338,13 @@ def execute_query(query, params={}, transaction=True, context=""):
     :rtype: dict
     
     """
-    if _the_connection is None:
+    if conn is None:
+        conn = _the_connection
+
+    if conn is None:
         raise ValueError('setup() not called')
 
-    return _the_connection.execute_query(query, params, transaction, context)
+    return conn.execute_query(query, params, transaction, context)
 
 
 def sync_spec(filename, host, graph_name, dry_run=False):

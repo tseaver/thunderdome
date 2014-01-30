@@ -483,22 +483,25 @@ class Vertex(Element):
     element_type = None
 
     @classmethod
-    def _create_indices(cls):
+    def _create_indices(cls, conn=None):
         """
         Creates this model's indices. This will be skipped if connection.setup
         hasn't been called, but connection.setup calls this method on existing
         vertices
         """
-        conn = cls._get_connection()
-        
-        if conn is None: return
+        if conn is None:
+            conn = cls._get_connection()
+
+        if conn is None:
+            return
+
         for column in cls._columns.values():
             if column.index or conn._index_all_fields:
                 conn.create_key_index(column.db_field_name)
 
     @classmethod
     def _on_new_connection(cls, conn):
-        cls._create_indices()
+        cls._create_indices(conn)
     
     @classmethod
     def get_element_type(cls):
@@ -511,7 +514,7 @@ class Vertex(Element):
         return cls._type_name(cls.element_type)
     
     @classmethod
-    def all(cls, vids, as_dict=False):
+    def all(cls, vids, as_dict=False, conn=None):
         """
         Load all vertices with the given vids from the graph. By default this
         will return a list of vertices but if as_dict is True then it will
@@ -525,7 +528,9 @@ class Vertex(Element):
         :rtype: dict or list
         
         """
-        conn = cls._get_connection()
+        if conn is None:
+            conn = cls._get_connection()
+
         if not isinstance(vids, (list, tuple)):
             raise ThunderdomeQueryError("vids must be of type list or tuple")
         
@@ -552,19 +557,21 @@ class Vertex(Element):
         
         return objects
 
-    def _reload_values(self):
+    def _reload_values(self, conn=None):
         """
         Method for reloading the current vertex by reading its current values
         from the database.
         """
-        conn = self._get_connection()
+        if conn is None:
+            conn = self._get_connection()
+
         results = conn.execute_query('g.v(eid)', {'eid':self.eid})[0]
         del results['_id']
         del results['_type']
         return results
 
     @classmethod
-    def get(cls, vid):
+    def get(cls, vid, conn=None):
         """
         Look up vertex by thunderdome assigned UUID. Raises a DoesNotExist
         exception if a vertex with the given vid was not found. Raises a
@@ -576,6 +583,9 @@ class Vertex(Element):
         :rtype: thunderdome.models.Vertex
         
         """
+        if conn is None:
+            conn = cls._get_connection()
+
         try:
             results = cls.all([vid])
             if len(results) >1:
@@ -591,7 +601,7 @@ class Vertex(Element):
             raise cls.DoesNotExist
     
     @classmethod
-    def get_by_eid(cls, eid):
+    def get_by_eid(cls, eid, conn=None):
         """
         Look update a vertex by its Titan-specific id (eid). Raises a
         DoesNotExist exception if a vertex with the given eid was not found.
@@ -601,7 +611,9 @@ class Vertex(Element):
         :rtype: thunderdome.models.Vertex
         
         """
-        conn = cls._get_connection()
+        if conn is None:
+            conn = cls._get_connection()
+
         results = conn.execute_query('g.v(eid)', {'eid':eid})
         if not results:
             raise cls.DoesNotExist
@@ -612,16 +624,17 @@ class Vertex(Element):
         Save the current vertex using the configured save strategy, the default
         save strategy is to re-save all fields every time the object is saved.
         """
+        conn = kwargs.pop('conn', None)
         super(Vertex, self).save(*args, **kwargs)
         params = self.as_save_params()
         params['element_type'] = self.get_element_type()
-        result = self._save_vertex(params)[0]
+        result = self._save_vertex(params, conn=conn)[0]
         self.eid = result.eid
         for k,v in self._values.items():
             v.previous_value = result._values[k].previous_value
         return result
     
-    def delete(self):
+    def delete(self, conn=None):
         """
         Delete the current vertex from the graph.
         """
@@ -633,7 +646,9 @@ class Vertex(Element):
         g.removeVertex(g.v(eid))
         g.stopTransaction(SUCCESS)
         """
-        conn = self._get_connection()
+        if conn is None:
+            conn = self._get_connection()
+
         results = conn.execute_query(query, {'eid': self.eid})
         
     def _simple_traversal(self,
@@ -641,7 +656,9 @@ class Vertex(Element):
                           labels,
                           limit=None,
                           offset=None,
-                          types=None):
+                          types=None,
+                          conn=None,
+                         ):
         """
         Perform simple graph database traversals with ubiquitous pagination.
 
@@ -688,9 +705,11 @@ class Vertex(Element):
                                label_strings,
                                start,
                                end,
-                               allowed_elts)
+                               allowed_elts,
+                               conn=conn,
+                              )
 
-    def _simple_deletion(self, operation, labels):
+    def _simple_deletion(self, operation, labels, conn=None):
         """
         Perform simple bulk graph deletion operation.
 
@@ -708,7 +727,7 @@ class Vertex(Element):
                 label_string = label.get_label()
             label_strings.append(label_string)
 
-        return self._delete_related(operation, label_strings)
+        return self._delete_related(operation, label_strings, conn=conn)
 
     def outV(self, *labels, **kwargs):
         """
@@ -809,21 +828,21 @@ class Vertex(Element):
         return self._simple_traversal('bothV', labels, **kwargs)
 
 
-    def delete_outE(self, *labels):
+    def delete_outE(self, *labels, **kw):
         """Delete all outgoing edges with the given label."""
-        self._simple_deletion('outE', labels)
+        self._simple_deletion('outE', labels, **kw)
 
-    def delete_inE(self, *labels):
+    def delete_inE(self, *labels, **kw):
         """Delete all incoming edges with the given label."""
-        self._simple_deletion('inE', labels)
+        self._simple_deletion('inE', labels, **kw)
 
-    def delete_outV(self, *labels):
+    def delete_outV(self, *labels, **kw):
         """Delete all outgoing vertices connected with edges with the given label."""
-        self._simple_deletion('outV', labels)
+        self._simple_deletion('outV', labels, **kw)
 
-    def delete_inV(self, *labels):
+    def delete_inV(self, *labels, **kw):
         """Delete all incoming vertices connected with edges with the given label."""
-        self._simple_deletion('inV', labels)
+        self._simple_deletion('inV', labels, **kw)
 
     def query(self):
         return Query(self)
@@ -990,7 +1009,7 @@ class Edge(Element):
         return cls._type_name(cls.label)
     
     @classmethod
-    def get_between(cls, outV, inV, page_num=None, per_page=None):
+    def get_between(cls, outV, inV, page_num=None, per_page=None, conn=None):
         """
         Return all the edges with a given label between two vertices.
         
@@ -1009,7 +1028,9 @@ class Edge(Element):
                                       in_v=inV,
                                       label=cls.get_label(),
                                       page_num=page_num,
-                                      per_page=per_page)
+                                      per_page=per_page,
+                                      conn=conn,
+                                     )
     
     def validate(self):
         """
@@ -1027,25 +1048,30 @@ class Edge(Element):
         """
         Save this edge to the graph database.
         """
+        conn = kwargs.pop('conn', None)
         super(Edge, self).save(*args, **kwargs)
         return self._save_edge(self._outV,
                                self._inV,
                                self.get_label(),
                                self.as_save_params(),
-                               exclusive=self.__exclusive__)[0]
+                               exclusive=self.__exclusive__,
+                               conn=conn,
+                              )[0]
 
-    def _reload_values(self):
+    def _reload_values(self, conn=None):
         """
         Re-read the values for this edge from the graph database.
         """
-        conn = self._get_connection()
+        if conn is None:
+            conn = self._get_connection()
+
         results = conn.execute_query('g.e(eid)', {'eid':self.eid})[0]
         del results['_id']
         del results['_type']
         return results
 
     @classmethod
-    def get_by_eid(cls, eid):
+    def get_by_eid(cls, eid, conn=None):
         """
         Return the edge with the given Titan-specific eid. Raises a
         DoesNotExist exception if no edge is found.
@@ -1054,7 +1080,8 @@ class Edge(Element):
         :type eid: int
         
         """
-        conn = cls._get_connection()
+        if conn is None:
+            conn = cls._get_connection()
         results = conn.execute_query('g.e(eid)', {'eid':eid})
         if not results:
             raise cls.DoesNotExist
@@ -1074,7 +1101,7 @@ class Edge(Element):
         """
         return super(Edge, cls).create(outV, inV, *args, **kwargs)
     
-    def delete(self):
+    def delete(self, conn=None):
         """
         Delete the current edge from the graph.
         """
@@ -1089,10 +1116,11 @@ class Edge(Element):
           g.stopTransaction(SUCCESS)
         }
         """        
-        conn = self._get_connection()
+        if conn is None:
+            conn = self._get_connection()
         results = conn.execute_query(query, {'eid':self.eid})
 
-    def _simple_traversal(self, operation):
+    def _simple_traversal(self, operation, conn=None):
         """
         Perform a simple traversal starting from the current edge returning a
         list of results.
@@ -1102,12 +1130,13 @@ class Edge(Element):
         :rtype: list
         
         """
-        conn = self._get_connection()
+        if conn is None:
+            conn = self._get_connection()
         results = conn.execute_query('g.e(eid).%s()' % operation,
                                         {'eid':self.eid})
         return [Element.deserialize(r) for r in results]
         
-    def inV(self):
+    def inV(self, conn=None):
         """
         Return the vertex that this edge goes into.
 
@@ -1115,12 +1144,12 @@ class Edge(Element):
         
         """
         if self._inV is None:
-            self._inV = self._simple_traversal('inV')
+            self._inV = self._simple_traversal('inV', conn=conn)
         elif isinstance(self._inV, (int, long)):
-            self._inV = Vertex.get_by_eid(self._inV)
+            self._inV = Vertex.get_by_eid(self._inV, conn=conn)
         return self._inV
     
-    def outV(self):
+    def outV(self, conn=None):
         """
         Return the vertex that this edge is coming out of.
 
@@ -1128,9 +1157,9 @@ class Edge(Element):
         
         """
         if self._outV is None:
-            self._outV = self._simple_traversal('outV')
+            self._outV = self._simple_traversal('outV', conn=conn)
         elif isinstance(self._outV, (int, long)):
-            self._outV = Vertex.get_by_eid(self._outV)
+            self._outV = Vertex.get_by_eid(self._outV, conn=conn)
         return self._outV
 
 
@@ -1152,12 +1181,12 @@ class Query(object):
         self._direction = []
         self._vars = {}
 
-    def count(self):
+    def count(self, conn=None):
         """
         :return: number of matching vertices
         :rtype int
         """
-        return self._execute('count', deserialize=False)[0]
+        return self._execute('count', deserialize=False, conn=conn)[0]
 
     def direction(self, direction):
         """
@@ -1170,11 +1199,11 @@ class Query(object):
         q._direction = direction
         return q
 
-    def edges(self):
+    def edges(self, conn=None):
         """
         :return list of matching edges
         """
-        return self._execute('edges')
+        return self._execute('edges', conn=conn)
 
     def has(self, key, value, compare=EQUAL):
         """
@@ -1222,11 +1251,11 @@ class Query(object):
         q._limit = limit
         return q
 
-    def vertexIds(self):
-        return self._execute('vertexIds', deserialize=False)
+    def vertexIds(self, conn=None):
+        return self._execute('vertexIds', deserialize=False, conn=conn)
 
-    def vertices(self):
-        return self._execute('vertices')
+    def vertices(self, conn=None):
+        return self._execute('vertices', conn=conn)
 
     def _get_partial(self):
         limit = ".limit(limit)" if self._limit else ""
@@ -1278,19 +1307,14 @@ class Query(object):
 
         return "g.v(eid).query(){}{}{}{}{}".format(labels, limit, dir, has, intervals)
 
-    def _execute(self, func, deserialize=True):
+    def _execute(self, func, deserialize=True, conn=None):
         tmp = "{}.{}()".format(self._get_partial(), func)
         self._vars.update({"eid":self._vertex.eid, "limit":self._limit})
-        conn = self._vertex._get_connection()
+        if conn is None:
+            conn = self._vertex._get_connection()
         results = conn.execute_query(tmp, self._vars)
 
         if deserialize:
             return  [Element.deserialize(r) for r in results]
         else:
             return results
-
-
-
-
-
-

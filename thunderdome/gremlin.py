@@ -131,6 +131,7 @@ class BaseGremlinMethod(object):
         :type instance: object
 
         """
+        conn = kwargs.pop('conn', None)
         self._setup()
 
         args = list(args)
@@ -176,11 +177,12 @@ class BaseGremlinMethod(object):
 
             context = "{}.{}".format(context, self.method_name)
 
-            _get_connection = getattr(instance, '_get_connection', None)
-            if _get_connection is None:
-                conn = connection._the_connection
-            else:
-                conn = _get_connection()
+            if conn is None:
+                _get_connection = getattr(instance, '_get_connection', None)
+                if _get_connection is None:
+                    conn = connection._the_connection
+                else:
+                    conn = _get_connection()
             tmp = conn.execute_query(self.function_body, params,
                                      transaction=self.transaction,
                                      context=context)
